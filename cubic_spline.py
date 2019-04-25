@@ -1,5 +1,9 @@
 # coding=utf-8
 import json
+import matplotlib.pyplot as plt
+import numpy as np
+
+DELTA = 0.1
 
 
 def time_in_sec(time_from_start):
@@ -35,26 +39,86 @@ def fit_cubic_spline(n, x, dt, vi, vf):
     x1[n - 1] = vf
     return x1, x2
 
+
 def format_data(points):
     x = []
     v = []
     a = []
     dt = []
+    t = []
     prev_t = 0
     for point in points:
         x.append(point['positions'][0])
         v.append(point['velocities'][0])
         a.append(point['accelerations'][0])
         s = time_in_sec(point['time_from_start'])
+        t.append(s)
         dt.append(s - prev_t)
         prev_t = s
-    return x, v, a, dt
+    return x, v, a, dt, t
 
+
+class Spline:
+    def __init__(self, tim1, tim0, acc1, acc0, pos1, pos0):
+        self.tim1 = tim1
+        self.tim0 = tim0
+        self.acc1 = acc1
+        self.acc0 = acc0
+        self.pos1 = pos1
+        self.pos0 = pos0
+        self.h = tim1 - tim0
+
+    def __call__(self, val, velocity=False):
+        if velocity:
+            return self.velocity(val)
+        return self.spline(val)
+
+    def spline(self, val):
+        return (self.tim1 - val) ** 3 * self.acc0 / (6 * self.h) + \
+               (val - self.tim0) ** 3 * self.acc1 / (6 * self.h) + \
+               (self.pos0 / self.h - self.acc0 * self.h / 6) * (self.tim1 - val) + \
+               (self.pos1 / self.h - self.acc1 * self.h / 6) * (val - self.tim0)
+
+    def velocity(self, val):
+        return -(self.tim1 - val)**2 * self.acc0 / (2*self.h) + \
+               (val - self.tim0)**2 * self.acc1 / (2*self.h) + \
+               ((self.pos1-self.pos0)/self.h - self.h*(self.acc1-self.acc0)/6)
+
+def make_splines(acc, tim, pos):
+    for i in range(1, len(x2)):
+        h = tim[i] - tim[i - 1]
+        # def make_spline(val):
+        #     return (tim[i] - val) ** 3 * acc[i - 1] / (6 * h) + (val - tim[i - 1]) ** 3 * acc[i] / (6 * h) + \
+        #            (pos[i - 1] / h - acc[i - 1] * h / 6) * (tim[i] - val) + (pos[i]/h - acc[i]*h/6)*(val-tim[i-1])
+        yield Spline(tim[i], tim[i-1], acc[i], acc[i-1], pos[i], pos[i-1])
 
 if __name__ == '__main__':
     with open("topics.json") as infile:
         data = json.loads(infile.read())
     points = data['arm'][0]['goal']['trajectory']['points']
-    x, v, a, dt = format_data(points)
+    x, v, a, dt, t = format_data(points)
     x1, x2 = fit_cubic_spline(len(x), x, dt[1:], v[0], v[-1])
-    print x1, x2
+    splines = []
+    for spline in make_splines(x2, t, x):
+        splines.append(spline)
+
+    plt.plot(t, x, marker='o', linestyle='None', color='r', label='pos')
+    # for i in range(len(x)):
+    #     time_slices = np.linspace(t[i] - DELTA, t[i] + DELTA, 10)
+    #     def y(xi):
+    #         return v[i] * (xi - t[i]) + x[i] + 0.1
+    #     slope = [y(j) for j in time_slices]
+    #     plt.plot(time_slices, slope, linestyle='solid', color='b', label='p{}_v'.format(i))
+    for i in range(len(splines)):
+        time_slices = np.linspace(t[i], t[i+1], 10)
+        slope = [splines[i](j) for j in time_slices]
+        plt.plot(time_slices, slope, linestyle='solid', color='g' if i%2 else 'b', label='p{}_v1'.format(i))
+        print(t[i+1], splines[i](t[i+1], velocity=True), x1[i+1])
+    plt.xlim([-.2, max(t) + 0.2])
+    plt.xlabel('Time(s)')
+    plt.ylabel('Position(rad)')
+    plt.title('Cubic Spline')
+    # plt.legend()
+    plt.show()
+
+    # print x1, x2
